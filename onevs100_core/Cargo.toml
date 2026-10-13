@@ -1,0 +1,17 @@
+[package]
+name = "onevs100_core"
+version = "0.1.0"
+edition = "2021"
+description = "Core library for 1 vs 100 content package editor"
+
+[dependencies]
+anyhow = { workspace = true }
+image = { workspace = true }
+stfs = { git = "https://github.com/landaire/acceleration", package = "stfs" }
+xenon_types = { git = "https://github.com/landaire/acceleration", package = "xenon_types" }
+xex2 = { git = "https://github.com/landaire/acceleration", package = "xex2" }
+lzxd = "0.2"
+dirs = "7"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+sha1 = "0.10"
+flate2 = "1"

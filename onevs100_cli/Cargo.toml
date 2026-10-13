@@ -1,0 +1,10 @@
+[package]
+name = "onevs100_cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for 1 vs 100 content package editor"
+
+[dependencies]
+onevs100_core = { path = "../onevs100_core" }
+clap = { workspace = true }
+anyhow = { workspace = true }

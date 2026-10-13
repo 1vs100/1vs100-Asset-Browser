@@ -1,0 +1,3 @@
+target/
+!testdata/checksums.sha256
+testdata/*

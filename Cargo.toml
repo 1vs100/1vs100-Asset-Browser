@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "onevs100_core",
+    "onevs100_cli",
+    "onevs100_gui",
+]
+
+[workspace.dependencies]
+wgpu = { version = "24", features = ["wgsl"] }
+winit = { version = "0.30", features = ["serde"] }
+pollster = "0.3"
+glam = "0.24"
+image = { version = "0.25", features = ["png", "jpeg", "bmp", "tiff", "dds"] }
+bcndecode = "0.1"
+tbc = "0.1"
+squish = "1.0.0"
+stb_dxt = "0.1"
+ucfx_byteswap = "2.1"
+bytemuck = "1.14"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+iced = { version = "0.14", features = ["wgpu"] }
+puffin = { version = "0.13", features = ["profile"] }

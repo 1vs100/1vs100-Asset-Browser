@@ -1,0 +1,11 @@
+[package]
+name = "onevs100_gui"
+version = "0.1.0"
+edition = "2021"
+description = "GUI for 1 vs 100 content package editor"
+
+[dependencies]
+onevs100_core = { path = "../onevs100_core" }
+iced = { workspace = true, features = ["image", "highlighter"] }
+anyhow = { workspace = true }
+rfd = "0.17"
