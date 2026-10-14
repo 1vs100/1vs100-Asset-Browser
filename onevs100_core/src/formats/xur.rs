@@ -195,7 +195,7 @@ struct Context<'a> {
 }
 
 fn class(name: &str) -> Result<&'static Class> {
-    crate::xur_schema::CLASSES.iter().find(|c| c.name == name).ok_or_else(|| anyhow::anyhow!("unknown class {name}"))
+    super::xur_schema::CLASSES.iter().find(|c| c.name == name).ok_or_else(|| anyhow::anyhow!("unknown class {name}"))
 }
 
 fn lineage(name: &str) -> Result<Vec<&'static Class>> {

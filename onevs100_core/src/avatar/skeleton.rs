@@ -1,8 +1,8 @@
-use crate::bitpack::{Bits, VectorCtx, VECTOR_HEADER_BITS};
+use super::bitpack::{Bits, VectorCtx, VECTOR_HEADER_BITS};
 use crate::body::Gender;
 use anyhow::{ensure, Result};
 
-const TABLE: &[u8] = include_bytes!("../data/embedded_skeletons.bin");
+const TABLE: &[u8] = include_bytes!("../../data/embedded_skeletons.bin");
 const VERSION_STRIDE: usize = 0x220;
 const COUNT_BITS: usize = 32;
 const PARENT_BITS: usize = 8;

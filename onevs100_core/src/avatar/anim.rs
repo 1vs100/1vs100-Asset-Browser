@@ -1,4 +1,4 @@
-use crate::bitpack::{Bits, VectorCtx, VECTOR_HEADER_BITS};
+use super::bitpack::{Bits, VectorCtx, VECTOR_HEADER_BITS};
 use anyhow::{ensure, Result};
 
 pub const JOINT_NAMES: [&str; 71] = [

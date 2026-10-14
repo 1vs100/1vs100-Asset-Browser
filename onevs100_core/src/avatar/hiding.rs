@@ -21,7 +21,7 @@ pub fn template(asset: &[u8]) -> Result<Template> {
         return Ok(Template { target_index_bytes, triangles: Vec::new() });
     }
     ensure!(width > 0 && width <= 16 && HEADER_BYTES + (count * width).div_ceil(8) <= d.len(), "bad triangle list ({count} values of {width} bits)");
-    let bits = crate::bitpack::Bits(&d[HEADER_BYTES..]);
+    let bits = super::bitpack::Bits(&d[HEADER_BYTES..]);
     Ok(Template { target_index_bytes, triangles: (0..count).map(|i| bits.read(i * width, width)).collect() })
 }
 

@@ -1,81 +1,75 @@
-pub mod anim;
-mod bitpack;
-pub mod assets;
-pub mod audio;
 pub mod avatar;
 pub mod browser;
-pub mod caff;
-pub mod inspect;
-pub mod lzx;
-pub mod model;
-pub mod mct;
-pub mod figure;
-pub mod hiding;
-pub mod pose;
-pub mod render;
-pub mod skeleton;
-pub mod support;
-pub mod shade;
-pub mod source;
-pub mod stfs;
-pub mod strb;
-pub mod texture;
-pub mod timefmt;
-pub mod video;
-pub mod xdbf;
-pub mod xex;
-pub mod xcontent;
-pub mod xenos;
-pub mod xsb;
-pub mod xwb;
-pub mod xui;
-pub mod xur;
-pub mod blend;
-pub mod body;
-pub mod toc;
-pub mod viewer;
-pub mod ytgr;
-mod xur_schema;
+pub mod formats;
+
+pub use avatar::{
+    anim, blend, body, figure, hiding, model, pose, render, shade, skeleton, texture, xenos,
+};
+pub use browser::{assets, audio, inspect, mct, source, support, video, viewer};
+pub use formats::{
+    caff, lzx, stfs, strb, timefmt, toc, xcontent, xdbf, xex, xsb, xui, xur, xwb, ytgr,
+};
 
 #[cfg(test)]
+#[path = "tests/tests.rs"]
 mod tests;
 #[cfg(test)]
-mod tests_packages;
-#[cfg(test)]
-mod tests_fixtures;
-#[cfg(test)]
-mod tests_browser;
-#[cfg(test)]
-mod tests_meta;
-#[cfg(test)]
-mod tests_avatar;
-#[cfg(test)]
-mod tests_xur;
-#[cfg(test)]
+#[path = "tests/tests_anim.rs"]
 mod tests_anim;
 #[cfg(test)]
-mod tests_shade;
-#[cfg(test)]
-mod tests_xex_vfs;
-#[cfg(test)]
+#[path = "tests/tests_assets.rs"]
 mod tests_assets;
 #[cfg(test)]
-mod tests_cover;
-#[cfg(test)]
-mod tests_viewer;
-#[cfg(test)]
-mod tests_camera;
-#[cfg(test)]
-mod tests_support;
-#[cfg(test)]
-mod tests_skeleton;
-#[cfg(test)]
-mod tests_toc;
-#[cfg(test)]
-mod tests_ytgr;
-#[cfg(test)]
+#[path = "tests/tests_audio.rs"]
 mod tests_audio;
 #[cfg(test)]
+#[path = "tests/tests_avatar.rs"]
+mod tests_avatar;
+#[cfg(test)]
+#[path = "tests/tests_browser.rs"]
+mod tests_browser;
+#[cfg(test)]
+#[path = "tests/tests_camera.rs"]
+mod tests_camera;
+#[cfg(test)]
+#[path = "tests/tests_cover.rs"]
+mod tests_cover;
+#[cfg(test)]
+#[path = "tests/tests_fixtures.rs"]
+mod tests_fixtures;
+#[cfg(test)]
+#[path = "tests/tests_lzx.rs"]
 mod tests_lzx;
 #[cfg(test)]
+#[path = "tests/tests_meta.rs"]
+mod tests_meta;
+#[cfg(test)]
+#[path = "tests/tests_model.rs"]
 mod tests_model;
+#[cfg(test)]
+#[path = "tests/tests_packages.rs"]
+mod tests_packages;
+#[cfg(test)]
+#[path = "tests/tests_shade.rs"]
+mod tests_shade;
+#[cfg(test)]
+#[path = "tests/tests_skeleton.rs"]
+mod tests_skeleton;
+#[cfg(test)]
+#[path = "tests/tests_support.rs"]
+mod tests_support;
+#[cfg(test)]
+#[path = "tests/tests_toc.rs"]
+mod tests_toc;
+#[cfg(test)]
+#[path = "tests/tests_viewer.rs"]
+mod tests_viewer;
+#[cfg(test)]
+#[path = "tests/tests_xex_vfs.rs"]
+mod tests_xex_vfs;
+#[cfg(test)]
+#[path = "tests/tests_xur.rs"]
+mod tests_xur;
+#[cfg(test)]
+#[path = "tests/tests_ytgr.rs"]
+mod tests_ytgr;

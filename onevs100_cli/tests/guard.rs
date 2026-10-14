@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-const ZIP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/big/su17559/su.zip");
-const SAMPLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/common/game_builds/v1.0.808.0_debug_unmodified/media/avatars/FemaleHost.avd");
+const ZIP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/su/SystemUpdate_17559_USB.zip");
+const SAMPLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/avatar/FemaleHost.avd");
 
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("onevs100_cli_{name}_{}", std::process::id()));
@@ -28,9 +28,6 @@ fn every_command_is_refused_until_the_assets_are_imported() {
 
 #[test]
 fn importing_unlocks_the_commands_and_persists() {
-    if !Path::new(ZIP).exists() || !Path::new(SAMPLE).exists() {
-        return;
-    }
     let data = scratch("unlock");
     let bad = run(&data, &["import-assets", SAMPLE]);
     assert_ne!(bad.status.code(), Some(0));

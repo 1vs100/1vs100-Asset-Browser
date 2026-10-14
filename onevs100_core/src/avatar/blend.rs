@@ -1,4 +1,4 @@
-use crate::bitpack::{Bits, VectorCtx, VECTOR_HEADER_BITS};
+use super::bitpack::{Bits, VectorCtx, VECTOR_HEADER_BITS};
 use crate::model::{self, Model};
 use anyhow::{ensure, Result};
 
