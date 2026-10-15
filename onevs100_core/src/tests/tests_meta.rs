@@ -1,4 +1,3 @@
-use crate::browser::Browser;
 use crate::inspect::{self, Detail};
 use crate::{mct, timefmt, video};
 use std::path::PathBuf;
@@ -70,16 +69,7 @@ fn game_executable_names_its_title() {
 
 #[test]
 fn every_xex_in_the_game_builds_is_readable() {
-    let found: Vec<_> = [
-        "common/v1.0.808.0_debug_unmodified/1vs100-fre.xex",
-        "common/v2.0.1149.0.02-2009-10-26_retail/default.xex",
-        "common/v2.0.1167.0.02-2009-12-07/default.xex",
-        "common/v2.0.1317.0.02-2010-04-14/tickettracker/tickettrackeruploader.xex",
-        "common/primetime-beta/Default.xex",
-    ]
-    .iter()
-    .map(|r| (r, describe_file(r)))
-    .collect();
+    let found: Vec<_> = ["common/v1.0.808.0_debug_unmodified/1vs100-fre.xex", "common/v2.0.1149.0.02-2009-10-26_retail/default.xex", "common/v2.0.1167.0.02-2009-12-07/default.xex", "common/v2.0.1317.0.02-2010-04-14/tickettracker/tickettrackeruploader.xex", "common/primetime-beta/Default.xex"].iter().map(|r| (r, describe_file(r))).collect();
     for (rel, d) in found {
         assert_eq!(d.kind, "Xbox 360 executable (XEX)", "{rel}: {:?}", d.lines.first());
         assert!(has(&d, "load address"), "{rel}");
@@ -113,31 +103,10 @@ fn wmv_details_report_streams_like_ffprobe() {
 }
 
 #[test]
-fn wmv_previews_a_frame_at_the_video_size() {
-    if !video::decoder_available() {
-        return;
-    }
+fn wmv_does_not_decode_until_play() {
     let d = describe_show("media/movies/titleintroaudio.wmv");
-    let img = d.image.expect("video frame");
-    assert_eq!((img.width, img.height), (1280, 720));
-    assert!(img.rgba.chunks(4).any(|p| p[0] != img.rgba[0]), "frame is a single flat colour");
-}
-
-#[test]
-fn seeking_a_video_changes_the_frame() {
-    if !video::decoder_available() {
-        return;
-    }
-    let root = testdata("dlcs/shows");
-    let mut b = Browser::new(&root).unwrap();
-    let package = b.entries().iter().position(|e| e.name == SHOW_ID).unwrap();
-    b.open(package).unwrap();
-    let i = b.entries().iter().position(|e| e.name.ends_with("promo_1.wmv")).unwrap();
-    b.open(i).unwrap();
-    assert!(b.video_seconds().unwrap() > 25.0);
-    let start = b.detail().unwrap().image.clone().unwrap();
-    b.seek_video(0.9).unwrap();
-    assert_ne!(b.detail().unwrap().image.clone().unwrap().rgba, start.rgba);
+    assert!(d.image.is_none());
+    assert!(has(&d, "press Play"));
 }
 
 #[test]
@@ -169,21 +138,56 @@ fn non_text_files_have_no_text_body() {
 }
 
 #[test]
-fn frame_extraction_works_with_any_ffmpeg_decodable_clip() {
-    if !video::ffmpeg_available() {
-        return;
-    }
-    let clip = std::env::temp_dir().join(format!("onevs100-clip-{}.avi", std::process::id()));
-    let made = std::process::Command::new("ffmpeg")
-        .args(["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x48:rate=10:duration=2", "-c:v", "mpeg4"])
-        .arg(&clip)
-        .status()
-        .unwrap();
-    assert!(made.success());
-    let png = video::frame_png(&std::fs::read(&clip).unwrap(), 1.0).unwrap();
-    std::fs::remove_file(&clip).ok();
+fn frame_extraction_reads_a_wmv_and_rejects_garbage() {
+    let png = video::frame_png(&show_file("media/ads/promo_1.wmv"), 0.0).unwrap();
     assert_eq!(&png[..4], b"\x89PNG");
     assert!(video::frame_png(b"not a video", 0.0).is_err());
+}
+
+#[test]
+fn wmv_soundtrack_is_pcm() {
+    let audio = video::soundtrack(&show_file("media/ads/promo_1.wmv")).unwrap().expect("wma");
+    assert!(audio.sample_rate >= 8000 && audio.channels > 0, "{} Hz {} ch", audio.sample_rate, audio.channels);
+    assert!(audio.samples.len() > 1000, "{} samples", audio.samples.len());
+}
+
+#[test]
+fn playback_follows_the_audio_clock_without_going_backwards() {
+    let pts = [0, 33, 66, 40, 99];
+    let mut shown = Vec::new();
+    for clock in [0, 33, 66, 99, 120] {
+        let chosen = video::frame_for_clock(clock, &pts).map(|i| pts[i]);
+        if let Some(pts) = chosen {
+            assert!(shown.last().is_none_or(|prev| pts >= *prev), "out of order {pts} after {shown:?}");
+            assert!(pts <= clock, "showed a future frame {pts} at {clock}");
+            shown.push(pts);
+        }
+    }
+    assert_eq!(shown, vec![0, 33, 66, 99, 99]);
+}
+
+#[test]
+fn playback_drops_a_late_backlog_to_the_audio_clock() {
+    let pts = [0, 33, 66, 99, 132];
+    assert_eq!(video::frame_for_clock(140, &pts), Some(4));
+    assert_eq!(video::frame_for_clock(50, &pts), Some(1), "must not skip ahead of the clock");
+}
+
+#[test]
+fn decoded_wmv_frames_stay_in_order_with_even_spacing() {
+    let mut pump = video::FramePump::open(show_file("media/ads/promo_1.wmv")).unwrap();
+    let mut pts = Vec::new();
+    for _ in 0..12 {
+        pts.push(pump.next_yuv().unwrap().expect("frame").pts_ms);
+    }
+    assert!(pts.windows(2).all(|w| w[1] >= w[0]), "out of order {pts:?}");
+    assert!(pts.last() > pts.first(), "frozen {pts:?}");
+    let gaps: Vec<u32> = pts.windows(2).map(|w| w[1] - w[0]).filter(|g| *g > 0).collect();
+    assert!(gaps.iter().all(|g| *g <= 100), "unsmooth {pts:?}");
+    for &clock in &pts {
+        let chosen = pts[video::frame_for_clock(clock, &pts).unwrap()];
+        assert_eq!(chosen, clock, "on-time clock skipped or reordered");
+    }
 }
 
 #[test]
@@ -209,11 +213,7 @@ fn xcontent_details_include_file_stamps() {
 }
 
 fn launch_children() -> Vec<crate::source::Entry> {
-    let live = crate::source::Entry {
-        name: "launch.xzp".into(),
-        is_dir: false,
-        payload: crate::source::Payload::Disk(testdata("common/v1.0.808.0_debug_unmodified/media/launch.xzp")),
-    };
+    let live = crate::source::Entry { name: "launch.xzp".into(), is_dir: false, payload: crate::source::Payload::Disk(testdata("common/v1.0.808.0_debug_unmodified/media/launch.xzp")) };
     crate::source::children(&live).unwrap().unwrap()
 }
 
@@ -252,15 +252,7 @@ fn every_xus_in_the_game_lists_its_strings() {
 }
 
 fn first_mct(name_part: &str) -> Vec<u8> {
-    let live = crate::source::Entry {
-        name: "episode.xzp".into(),
-        is_dir: false,
-        payload: crate::source::Payload::Bytes(crate::tests_fixtures::package_file(
-            "episodes",
-            "83136FF343124795DC1806A2DB044476589BD5C0",
-            "media/episode.xzp",
-        )),
-    };
+    let live = crate::source::Entry { name: "episode.xzp".into(), is_dir: false, payload: crate::source::Payload::Bytes(crate::tests_fixtures::package_file("episodes", "83136FF343124795DC1806A2DB044476589BD5C0", "media/episode.xzp")) };
     let kids = crate::source::children(&live).unwrap().unwrap();
     kids.iter().find(|k| k.name.contains(name_part)).unwrap().payload.read().unwrap()
 }

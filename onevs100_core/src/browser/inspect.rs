@@ -1,4 +1,4 @@
-use crate::{avatar, xdbf, body, strb, caff, lzx, model, render, texture, video, xcontent, xex, xsb, xui, xur, xwb, ytgr};
+use crate::{avatar, body, caff, lzx, model, render, strb, texture, video, xcontent, xdbf, xex, xsb, xui, xur, xwb, ytgr};
 use anyhow::{anyhow, ensure, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,7 +37,6 @@ pub fn preview_png(p: &Preview) -> Result<Vec<u8>> {
 pub use crate::support::is_supported as is_supported_name;
 
 const TEXT_SYNTAX: [(&str, &str); 7] = [(".xlast", "xml"), (".lua", "lua"), (".resx", "xml"), (".updb", "xml"), (".xml", "xml"), (".ext", "txt"), (".txt", "txt")];
-const VIDEO_PREVIEW_FRACTION: f64 = 0.1;
 
 fn plain(kind: &'static str, lines: Vec<String>) -> Detail {
     Detail { kind, lines, image: None, text: None, pending_preview: false, scene: None, figure: None }
@@ -132,10 +131,7 @@ fn model_summary(compressed: &[u8], gender: Option<body::Gender>) -> (Vec<String
     let mut lines = vec![format!("model: {} batches, {} textures", m.batches.len(), m.textures.len())];
     for (i, b) in m.batches.iter().enumerate() {
         let (lo, hi) = b.bounds();
-        lines.push(format!(
-            "batch {i}  shader {}  {} triangles  {} vertices  {} uv sets  {} params  bounds ({:.3}, {:.3}, {:.3}) to ({:.3}, {:.3}, {:.3})",
-            b.shader, b.triangles, b.vertices.len(), b.uv_sets, b.params.len(), lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]
-        ));
+        lines.push(format!("batch {i}  shader {}  {} triangles  {} vertices  {} uv sets  {} params  bounds ({:.3}, {:.3}, {:.3}) to ({:.3}, {:.3}, {:.3})", b.shader, b.triangles, b.vertices.len(), b.uv_sets, b.params.len(), lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]));
     }
     lines.extend(m.textures.iter().enumerate().map(|(i, t)| format!("texture {i}  {}x{}  format {:#010x}  {} bytes{}", t.width, t.height, t.format, t.data.len(), if t.placeholder { "  placeholder" } else { "" })));
     let base = gender.and_then(body::locate);
@@ -251,10 +247,6 @@ fn sound_bank(data: &[u8]) -> Result<Detail> {
     Ok(plain("XACT sound bank", lines))
 }
 
-pub fn video_frame(data: &[u8], seconds: f64) -> Option<Preview> {
-    video::frame_png(data, seconds).ok().and_then(|png| decode_image(&png))
-}
-
 fn video_details(data: &[u8]) -> Result<Detail> {
     let info = video::asf_info(data)?;
     let mut lines = vec![format!("duration {:.1} s", info.seconds), format!("{} bytes", data.len())];
@@ -264,11 +256,8 @@ fn video_details(data: &[u8]) -> Result<Detail> {
     if let Some(a) = &info.audio {
         lines.push(format!("audio {} ch {} Hz (format {:#06x})", a.channels, a.sample_rate, a.format_tag));
     }
-    let image = video_frame(data, info.seconds * VIDEO_PREVIEW_FRACTION);
-    if image.is_none() {
-        lines.push("no frame preview (needs ffmpeg with WMV3 support)".into());
-    }
-    Ok(Detail { kind: "Windows Media video", lines, image, text: None, pending_preview: false, scene: None, figure: None })
+    lines.push("press Play to watch".into());
+    Ok(Detail { kind: "Windows Media video", lines, image: None, text: None, pending_preview: false, scene: None, figure: None })
 }
 
 fn photoshop(data: &[u8]) -> Result<Detail> {
@@ -283,11 +272,7 @@ fn raster(data: &[u8]) -> Result<Detail> {
 }
 
 fn mct_texture(data: &[u8]) -> Detail {
-    let mut lines = vec![
-        format!("MCT second-stage texture codec, {} bytes", data.len()),
-        "stored under a .png name inside the archive".into(),
-        "preview is decoded by the game's own decoder (research helper), see the image once ready".into(),
-    ];
+    let mut lines = vec![format!("MCT second-stage texture codec, {} bytes", data.len()), "stored under a .png name inside the archive".into(), "preview is decoded by the game's own decoder (research helper), see the image once ready".into()];
     lines.extend(hex_dump(data).into_iter().skip(1).take(4));
     Detail { kind: "MCT texture", lines, image: None, text: None, pending_preview: true, scene: None, figure: None }
 }
@@ -373,4 +358,3 @@ pub fn describe(name: &str, data: &[u8]) -> Detail {
     }
     plain("Binary", hex_dump(data))
 }
-

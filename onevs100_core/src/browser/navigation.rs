@@ -103,10 +103,7 @@ impl Browser {
     pub fn audio_labels(&self) -> Vec<String> {
         match self.selected.as_ref().and_then(|s| s.audio.as_ref()) {
             Some(AudioSource::Bank { bank, .. }) => bank.entries.iter().map(|e| format!("{:03}  {} {} ch {} Hz  {:.2} s", e.index, e.codec_name(), e.channels, e.rate, e.seconds())).collect(),
-            Some(AudioSource::Cues { cues, bank }) => cues
-                .iter()
-                .map(|c| format!("{}  ({} variation{}){}", c.name, c.waves.len(), if c.waves.len() == 1 { "" } else { "s" }, if bank.is_none() { "  no wave bank next to it" } else { "" }))
-                .collect(),
+            Some(AudioSource::Cues { cues, bank }) => cues.iter().map(|c| format!("{}  ({} variation{}){}", c.name, c.waves.len(), if c.waves.len() == 1 { "" } else { "s" }, if bank.is_none() { "  no wave bank next to it" } else { "" })).collect(),
             None => Vec::new(),
         }
     }
@@ -122,15 +119,12 @@ impl Browser {
         }
     }
 
-    pub fn video_seconds(&self) -> Option<f64> {
-        self.selected.as_ref().and_then(|s| s.video_seconds)
+    pub fn selected_bytes(&self) -> Option<&[u8]> {
+        self.selected.as_ref().map(|s| s.data.as_slice())
     }
 
-    pub fn seek_video(&mut self, fraction: f64) -> Result<()> {
-        let sel = self.selected.as_mut().ok_or_else(|| anyhow!("nothing selected"))?;
-        let seconds = sel.video_seconds.ok_or_else(|| anyhow!("not a video"))? * fraction.clamp(0.0, 1.0);
-        sel.detail.image = Some(inspect::video_frame(&sel.data, seconds).ok_or_else(|| anyhow!("could not decode a frame at {seconds:.1} s"))?);
-        Ok(())
+    pub fn video_seconds(&self) -> Option<f64> {
+        self.selected.as_ref().and_then(|s| s.video_seconds)
     }
 
     pub fn open(&mut self, index: usize) -> Result<()> {

@@ -9,3 +9,4 @@ onevs100_core = { path = "../onevs100_core" }
 iced = { workspace = true, features = ["image", "highlighter"] }
 anyhow = { workspace = true }
 rfd = "0.17"
+rodio = { version = "0.17", default-features = false }

@@ -1,19 +1,19 @@
+mod video_surface;
 use iced::highlighter;
-use iced::widget::text::Wrapping;
 use iced::mouse::ScrollDelta;
+use iced::widget::text::Wrapping;
 use iced::widget::{button, column, container, image, mouse_area, pick_list, row, scrollable, text, text_editor, text_input, Row, Space};
 use iced::{Element, Font, Length, Point};
-use onevs100_core::audio::Player;
 use onevs100_core::assets::{self, Imported, Store};
+use onevs100_core::audio::Player;
 use onevs100_core::browser::Browser;
-use onevs100_core::inspect::{is_supported_name, Preview};
 use onevs100_core::figure::{self, Expression};
+use onevs100_core::inspect::{is_supported_name, Preview};
 use onevs100_core::mct;
 use onevs100_core::render::{Scene, TintPreset};
 use onevs100_core::viewer::ViewState;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
 const CONTROLS_MAX_HEIGHT: f32 = 150.0;
 const AUDIO_LIST_HEIGHT: f32 = 170.0;
 const DRAG_RESOLUTION: u32 = 224;
@@ -25,8 +25,8 @@ const HELP: [&str; 9] = [
     "Click any file to see its details; images and textures show a preview.",
     "Use Back to leave a package or archive, Up to leave a folder.",
     "Text files (lua, resx, xml, txt) open in a read-only highlighted viewer.",
-    "Videos show a frame; use the frame-at buttons to jump around (needs ffmpeg).",
-    "Wave banks and sound banks list their sounds; press play (needs ffplay with XMA support).",
+    "Videos stay still until you press Play.",
+    "Wave banks and sound banks list their sounds; press play.",
     "Packages and executables list their metadata (title id, versions, libraries).",
     "Export saves the selected file, or the shown texture as PNG, to the export folder.",
     "Type a folder path above and press Enter to jump anywhere.",
@@ -39,6 +39,7 @@ struct App {
     status: String,
     body: text_editor::Content,
     player: Player,
+    playing: Option<Arc<video_surface::Session>>,
     view: ViewState,
     live: Option<Preview>,
     pointer: [f32; 2],
@@ -93,7 +94,6 @@ enum Message {
     ExportDirChanged(String),
     ExportFile,
     ExportPng,
-    Seek(f64),
     Editor(text_editor::Action),
     Decoded(String, Result<Preview, String>),
     Play(usize),
@@ -111,6 +111,107 @@ enum Message {
     SetupPicked(Option<PathBuf>),
     SetupImport,
     SetupDone(Result<Imported, String>),
+    PlayVideo,
+    VideoEnded,
+}
+
+struct Clocked {
+    samples: Vec<f32>,
+    channels: u16,
+    rate: u32,
+    index: usize,
+    played: Arc<std::sync::atomic::AtomicU64>,
+    done: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Iterator for Clocked {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        let Some(&sample) = self.samples.get(self.index) else {
+            self.done.store(true, std::sync::atomic::Ordering::Relaxed);
+            return None;
+        };
+        self.index += 1;
+        if self.channels > 0 && self.index % usize::from(self.channels) == 0 {
+            self.played.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        Some(sample)
+    }
+}
+
+impl rodio::Source for Clocked {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+    fn sample_rate(&self) -> u32 {
+        self.rate
+    }
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        let frames = self.samples.len() / usize::from(self.channels.max(1));
+        Some(std::time::Duration::from_secs_f64(frames as f64 / f64::from(self.rate.max(1))))
+    }
+}
+
+fn start_playback(data: Arc<Vec<u8>>, session: Arc<video_surface::Session>, tx: std::sync::mpsc::SyncSender<onevs100_core::video::YuvPicture>) {
+    let stop = Arc::clone(&session.stop);
+    let audio_stop = Arc::clone(&stop);
+    let played = Arc::clone(&session.played);
+    let audio_session = Arc::clone(&session);
+    let audio_data = Arc::clone(&data);
+    std::thread::spawn(move || {
+        let Some(track) = onevs100_core::video::soundtrack(&audio_data).ok().flatten() else {
+            audio_session.audio_checked.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        };
+        let Ok((stream, handle)) = rodio::OutputStream::try_default() else {
+            audio_session.audio_checked.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        };
+        let Ok(sink) = rodio::Sink::try_new(&handle) else {
+            audio_session.audio_checked.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        };
+        audio_session.rate.store(track.sample_rate, std::sync::atomic::Ordering::Relaxed);
+        audio_session.has_audio.store(true, std::sync::atomic::Ordering::Relaxed);
+        audio_session.audio_checked.store(true, std::sync::atomic::Ordering::Relaxed);
+        sink.append(Clocked { samples: track.samples, channels: track.channels, rate: track.sample_rate, index: 0, played, done: Arc::clone(&audio_session.audio_done) });
+        while !audio_stop.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        drop(sink);
+        drop(stream);
+    });
+    let stop = Arc::clone(&stop);
+    let session = Arc::clone(&session);
+    std::thread::spawn(move || {
+        let mut pump = match onevs100_core::video::FramePump::open((*data).clone()) {
+            Ok(pump) => pump,
+            Err(e) => {
+                *session.error.lock().expect("video error") = Some(e.to_string());
+                return;
+            }
+        };
+        loop {
+            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            match pump.next_yuv() {
+                Ok(Some(frame)) => {
+                    if tx.send(frame).is_err() {
+                        return;
+                    }
+                }
+                Ok(None) => return,
+                Err(e) => {
+                    *session.error.lock().expect("video error") = Some(e.to_string());
+                    return;
+                }
+            }
+        }
+    });
 }
 
 fn default_export_dir() -> String {
@@ -118,15 +219,40 @@ fn default_export_dir() -> String {
 }
 
 impl App {
+    fn halt_video(&mut self) {
+        if let Some(play) = self.playing.take() {
+            play.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     fn new() -> Self {
         let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let browser = Browser::new(&start).expect("current directory is readable");
         let poses = pose_choices();
-        Self { browser, path_input: start.display().to_string(), export_dir: default_export_dir(), status: "Pick a folder or file on the left.".into(), body: text_editor::Content::new(), player: Player::new(), view: ViewState::default(), live: None, pointer: [0.0; 2], pose: default_pose(&poses), poses, expression: Expression::Neutral, tint: TintPreset::Original, styled: None, setup: (!assets::available()).then(Setup::default) }
+        Self {
+            browser,
+            path_input: start.display().to_string(),
+            export_dir: default_export_dir(),
+            status: "Pick a folder or file on the left.".into(),
+            body: text_editor::Content::new(),
+            player: Player::new(),
+            playing: None,
+            view: ViewState::default(),
+            live: None,
+            pointer: [0.0; 2],
+            pose: default_pose(&poses),
+            poses,
+            expression: Expression::Neutral,
+            tint: TintPreset::Original,
+            styled: None,
+            setup: (!assets::available()).then(Setup::default),
+        }
     }
 
     fn styled_figure(&mut self) {
-        let Some(detail) = self.browser.detail() else { return };
+        let Some(detail) = self.browser.detail() else {
+            return;
+        };
         if let (Some(figure), Some(pack)) = (&detail.figure, onevs100_core::body::pack_bytes()) {
             match figure.0.styled(pack, self.pose.id, self.expression) {
                 Ok(scene) => self.styled = Some(Arc::new(scene)),
@@ -150,14 +276,18 @@ impl App {
     }
 
     fn _redraw_original(&mut self, size: u32) {
-        let Some(scene) = self.browser.detail().and_then(|d| d.scene.clone()) else { return };
+        let Some(scene) = self.browser.detail().and_then(|d| d.scene.clone()) else {
+            return;
+        };
         let started = std::time::Instant::now();
         self.live = Some(scene.0.render(&self.view.camera, size, size));
         self.status = format!("View rendered in {} ms.", started.elapsed().as_millis());
     }
 
     fn start_import(&mut self) -> iced::Task<Message> {
-        let Some(setup) = &mut self.setup else { return iced::Task::none() };
+        let Some(setup) = &mut self.setup else {
+            return iced::Task::none();
+        };
         let path = PathBuf::from(setup.path_input.trim().trim_matches('\''));
         setup.busy = true;
         setup.error = None;
@@ -217,7 +347,9 @@ impl App {
     }
 
     fn decode_task(&mut self) -> iced::Task<Message> {
-        let Some((name, data)) = self.browser.pending_preview() else { return iced::Task::none() };
+        let Some((name, data)) = self.browser.pending_preview() else {
+            return iced::Task::none();
+        };
         self.status = format!("Decoding {name} with the game's own decoder (can take ~20 s for large textures)...");
         iced::Task::perform(async move { (name, mct::decode(&data).map_err(|e| e.to_string())) }, |(name, result)| Message::Decoded(name, result))
     }
@@ -255,7 +387,11 @@ impl App {
         }
         let opens = matches!(message, Message::Open(_));
         self.apply(message);
-        if opens { self.decode_task() } else { iced::Task::none() }
+        if opens {
+            self.decode_task()
+        } else {
+            iced::Task::none()
+        }
     }
 
     fn apply(&mut self, message: Message) {
@@ -313,6 +449,7 @@ impl App {
                 self.styled_figure();
             }
             Message::Open(i) => {
+                self.halt_video();
                 self.view.reset();
                 self.live = None;
                 self.styled = None;
@@ -322,10 +459,6 @@ impl App {
                 let r = self.browser.open(i);
                 self.report(r, |_| String::new());
                 self.load_body();
-            }
-            Message::Seek(fraction) => {
-                let r = self.browser.seek_video(fraction);
-                self.report(r, |_| format!("Showing frame at {:.0}%.", fraction * 100.0));
             }
             Message::Decoded(name, result) => match result {
                 Ok(preview) => {
@@ -341,7 +474,28 @@ impl App {
             Message::SetupPathChanged(_) | Message::SetupBrowse(_) | Message::SetupPicked(_) | Message::SetupImport | Message::SetupDone(_) => {}
             Message::Stop => {
                 self.player.stop();
+                self.halt_video();
                 self.status = "Stopped.".into();
+            }
+            Message::PlayVideo => {
+                self.player.stop();
+                self.halt_video();
+                match self.browser.selected_bytes() {
+                    Some(bytes) if self.browser.video_seconds().is_some() => {
+                        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        let (tx, rx) = std::sync::mpsc::sync_channel(4);
+                        let session = Arc::new(video_surface::Session::new(rx, Arc::clone(&stop)));
+                        start_playback(Arc::new(bytes.to_vec()), Arc::clone(&session), tx);
+                        self.playing = Some(session);
+                        self.status = "Playing video.".into();
+                    }
+                    _ => self.status = "Nothing to play.".into(),
+                }
+            }
+            Message::VideoEnded => {
+                let error = self.playing.as_ref().and_then(|p| p.error.lock().expect("video error").take());
+                self.halt_video();
+                self.status = error.map_or_else(|| "Video ended.".into(), |e| format!("Video decode failed: {e}"));
             }
             Message::Editor(action) => {
                 if !action.is_edit() {
@@ -365,12 +519,7 @@ impl App {
     }
 
     fn toolbar(&self) -> Element<'_, Message> {
-        column![
-            row![button("Back").on_press(Message::Back), button("Up").on_press(Message::Up), text_input("folder path", &self.path_input).on_input(Message::PathChanged).on_submit(Message::Go), button("Go").on_press(Message::Go)].spacing(6),
-            text(self.browser.breadcrumb()).size(13).width(Length::Fill).wrapping(Wrapping::WordOrGlyph),
-        ]
-        .spacing(6)
-        .into()
+        column![row![button("Back").on_press(Message::Back), button("Up").on_press(Message::Up), text_input("folder path", &self.path_input).on_input(Message::PathChanged).on_submit(Message::Go), button("Go").on_press(Message::Go)].spacing(6), text(self.browser.breadcrumb()).size(13).width(Length::Fill).wrapping(Wrapping::WordOrGlyph),].spacing(6).into()
     }
 
     fn listing(&self) -> Element<'_, Message> {
@@ -391,15 +540,8 @@ impl App {
             export.push(button("Export texture as PNG").on_press(Message::ExportPng).into());
         }
         let textures: Vec<Element<'_, Message>> = (0..self.browser.texture_count()).map(|i| button(text(format!("texture {i}")).size(13)).on_press(Message::Texture(i)).into()).collect();
-        let seek: Vec<Element<'_, Message>> = if self.browser.video_seconds().is_some() {
-            [0.0, 0.25, 0.5, 0.75, 0.95].iter().map(|f| button(text(format!("frame {:.0}%", f * 100.0)).size(13)).on_press(Message::Seek(*f)).into()).collect()
-        } else {
-            Vec::new()
-        };
-        let mut pieces: Vec<Element<'_, Message>> = vec![
-            wrapped(export),
-            row![text("Export folder:").size(13), text_input("export folder", &self.export_dir).on_input(Message::ExportDirChanged)].spacing(6).into(),
-        ];
+        let seek: Vec<Element<'_, Message>> = if self.browser.video_seconds().is_some() { vec![button(text("Play").size(13)).on_press(Message::PlayVideo).into(), button(text("Stop").size(13)).on_press(Message::Stop).into()] } else { Vec::new() };
+        let mut pieces: Vec<Element<'_, Message>> = vec![wrapped(export), row![text("Export folder:").size(13), text_input("export folder", &self.export_dir).on_input(Message::ExportDirChanged)].spacing(6).into()];
         for group in [textures, seek] {
             if !group.is_empty() {
                 pieces.push(wrapped(group));
@@ -422,18 +564,17 @@ impl App {
             let help = HELP.iter().fold(column![text("How to use").size(20)].spacing(6), |c, l| c.push(text(*l).size(14).width(Length::Fill).wrapping(Wrapping::Word)));
             return container(scrollable(help)).width(Length::FillPortion(3)).height(Length::Fill).padding(8).into();
         };
-        let shown = if detail.scene.is_some() { self.live.as_ref().or(detail.image.as_ref()) } else { detail.image.as_ref() };
-        let bitmap: Element<'_, Message> = shown.map_or_else(
-            || Space::new().into(),
-            |p| {
-                let handle = image::Handle::from_rgba(p.width, p.height, p.rgba.clone());
-                if detail.scene.is_some() {
-                    image(handle).width(Length::Fixed(FULL_RESOLUTION as f32)).height(Length::Fixed(FULL_RESOLUTION as f32)).into()
-                } else {
-                    image(handle).width(Length::Fill).content_fit(iced::ContentFit::ScaleDown).into()
-                }
-            },
-        );
+        let bitmap: Element<'_, Message> = if detail.scene.is_some() {
+            self.live.as_ref().or(detail.image.as_ref()).map_or_else(|| Space::new().into(), |p| image(image::Handle::from_rgba(p.width, p.height, p.rgba.clone())).width(Length::Fixed(FULL_RESOLUTION as f32)).height(Length::Fixed(FULL_RESOLUTION as f32)).into())
+        } else if self.browser.video_seconds().is_some() {
+            if let Some(play) = &self.playing {
+                iced::widget::shader::Shader::new(video_surface::Film { session: Arc::clone(play), ended: Message::VideoEnded }).width(Length::Fill).height(Length::Fixed(360.0)).into()
+            } else {
+                text("Press Play to watch.").size(14).into()
+            }
+        } else {
+            detail.image.as_ref().map_or_else(|| Space::new().into(), |p| image(image::Handle::from_rgba(p.width, p.height, p.rgba.clone())).width(Length::Fill).content_fit(iced::ContentFit::ScaleDown).into())
+        };
         let preview: Element<'_, Message> = if detail.scene.is_some() {
             let surface = mouse_area(bitmap).on_press(Message::ViewPress).on_move(Message::ViewMove).on_release(Message::ViewRelease).on_scroll(Message::ViewScroll);
             let mut options: Vec<Element<'_, Message>> = Vec::new();
@@ -446,38 +587,16 @@ impl App {
                 options.push(text("Tint").size(13).into());
                 options.push(pick_list(&TintPreset::ALL[..], Some(&self.tint), Message::TintChosen).text_size(13).into());
             }
-            column![
-                container(surface).width(Length::Fill).center_x(Length::Fill),
-                wrapped(options),
-                row![button("Reset view").on_press(Message::ViewReset), text("Drag to rotate, scroll to zoom.").size(13)].spacing(8)
-            ]
-            .spacing(6)
-            .into()
+            column![container(surface).width(Length::Fill).center_x(Length::Fill), wrapped(options), row![button("Reset view").on_press(Message::ViewReset), text("Drag to rotate, scroll to zoom.").size(13)].spacing(8)].spacing(6).into()
         } else {
             bitmap
         };
         let lines = detail.lines.iter().fold(column![].spacing(1).width(Length::Fill), |c, l| c.push(text(l.clone()).size(13).font(Font::MONOSPACE).width(Length::Fill).wrapping(Wrapping::WordOrGlyph)));
         let body: Element<'_, Message> = match &detail.text {
-            Some(t) => column![
-                lines,
-                text_editor(&self.body).on_action(Message::Editor).font(Font::MONOSPACE).size(13).highlight(t.syntax, highlighter::Theme::Base16Ocean).height(Length::Fill)
-            ]
-            .spacing(8)
-            .height(Length::Fill)
-            .into(),
+            Some(t) => column![lines, text_editor(&self.body).on_action(Message::Editor).font(Font::MONOSPACE).size(13).highlight(t.syntax, highlighter::Theme::Base16Ocean).height(Length::Fill)].spacing(8).height(Length::Fill).into(),
             None => scrollable(column![preview, lines].spacing(10).width(Length::Fill)).width(Length::Fill).height(Length::Fill).into(),
         };
-        column![
-            text(self.browser.selected_name().unwrap_or_default().to_owned()).size(18).width(Length::Fill).wrapping(Wrapping::WordOrGlyph),
-            text(detail.kind).size(14),
-            self.controls(),
-            self.audio_panel(),
-            body,
-        ]
-        .spacing(8)
-        .width(Length::FillPortion(3))
-        .height(Length::Fill)
-        .into()
+        column![text(self.browser.selected_name().unwrap_or_default().to_owned()).size(18).width(Length::Fill).wrapping(Wrapping::WordOrGlyph), text(detail.kind).size(14), self.controls(), self.audio_panel(), body,].spacing(8).width(Length::FillPortion(3)).height(Length::Fill).into()
     }
 
     fn view(&self) -> Element<'_, Message> {

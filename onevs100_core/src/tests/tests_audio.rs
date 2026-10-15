@@ -129,27 +129,13 @@ fn files_without_audio_offer_nothing_to_play() {
 }
 
 #[test]
-fn player_starts_and_stops_a_command() {
-    let mut p = Player::with_command("cat", &[]);
-    assert!(!p.is_playing());
-    p.play(b"RIFFxxxx").unwrap();
-    assert!(p.is_playing());
-    p.stop();
-    assert!(!p.is_playing());
+fn player_rejects_undecodable_audio() {
+    let err = Player::new().play(b"not a wav").unwrap_err().to_string();
+    assert!(err.contains("decode") || err.contains("RIFF") || err.contains("not a"), "{err}");
 }
 
 #[test]
-fn missing_player_gives_a_helpful_error() {
-    let mut p = Player::with_command("definitely-not-a-real-player", &[]);
-    let err = p.play(b"x").unwrap_err().to_string();
-    assert!(err.contains("definitely-not-a-real-player") && err.contains("ffplay"), "{err}");
-}
-
-#[test]
-fn xma_decodes_through_ffmpeg_when_the_codec_is_available() {
-    if !audio::xma_decoder_available() {
-        return;
-    }
+fn xma_decodes_to_pcm() {
     let d = read(UK, "vo.xwb");
     let b = xwb::parse(&d).unwrap();
     let pcm = audio::decode_pcm(&audio::wav(&d, &b, 0).unwrap()).unwrap();

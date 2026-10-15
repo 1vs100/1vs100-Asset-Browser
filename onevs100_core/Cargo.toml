@@ -15,3 +15,6 @@ dirs = "7"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 sha1 = "0.10"
 flate2 = "1"
+wmv-decoder = { version = "0.2", default-features = false, features = ["audio"] }
+xma2-rs = { git = "https://github.com/1vs100/xma2-rs" }
+rodio = { version = "0.17", default-features = false }

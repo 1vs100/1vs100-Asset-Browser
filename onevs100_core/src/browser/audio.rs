@@ -1,7 +1,7 @@
 use crate::xwb::{Bank, Codec};
 use anyhow::{anyhow, bail, ensure, Result};
-use std::io::Write;
-use std::process::{Child, Command, Stdio};
+use rodio::buffer::SamplesBuffer;
+use rodio::{OutputStream, Sink};
 
 const STANDARD_RATES: [u32; 8] = [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000];
 const XMA2_TAG: u16 = 0x166;
@@ -76,78 +76,85 @@ pub fn wav(bank_bytes: &[u8], bank: &Bank, index: usize) -> Result<Vec<u8>> {
     }
 }
 
-pub fn xma_decoder_available() -> bool {
-    Command::new("ffmpeg")
-        .args(["-hide_banner", "-decoders"])
-        .output()
-        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| matches!(l.split_whitespace().nth(1), Some("xma1" | "xma2"))))
-}
-
 pub fn decode_pcm(wav: &[u8]) -> Result<Vec<u8>> {
-    let mut child = Command::new("ffmpeg")
-        .args(["-hide_banner", "-v", "error", "-i", "pipe:0", "-f", "wav", "pipe:1"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| anyhow!("could not start ffmpeg: {e}"))?;
-    let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
-    let input = wav.to_vec();
-    let feeder = std::thread::spawn(move || stdin.write_all(&input));
-    let out = child.wait_with_output()?;
-    feeder.join().ok();
-    ensure!(out.status.success() && !out.stdout.is_empty(), "ffmpeg could not decode this wave: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("no output"));
-    Ok(out.stdout)
+    if wav.len() >= 22 && &wav[..4] == b"RIFF" && &wav[8..12] == b"WAVE" && &wav[12..16] == b"fmt " && u16::from_le_bytes([wav[20], wav[21]]) == 1 {
+        return Ok(wav.to_vec());
+    }
+    let audio = xma2_rs::decode_audio_file(wav).map_err(|e| anyhow!("could not decode this wave: {e}"))?;
+    ensure!(!audio.planes.is_empty(), "decoded wave has no samples");
+    let samples = audio.to_interleaved_i16();
+    let channels = audio.channels as u16;
+    let mut fmt = Vec::new();
+    fmt.extend_from_slice(&1u16.to_le_bytes());
+    fmt.extend_from_slice(&channels.to_le_bytes());
+    fmt.extend_from_slice(&audio.sample_rate.to_le_bytes());
+    fmt.extend_from_slice(&(audio.sample_rate * u32::from(channels) * 2).to_le_bytes());
+    fmt.extend_from_slice(&(channels * 2).to_le_bytes());
+    fmt.extend_from_slice(&16u16.to_le_bytes());
+    let pcm: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+    Ok(riff(&fmt, &pcm))
 }
 
 pub struct Player {
-    program: String,
-    args: Vec<String>,
-    child: Option<Child>,
+    stream: Option<OutputStream>,
+    sink: Option<Sink>,
 }
 
 impl Player {
     pub fn new() -> Self {
-        Player::with_command("ffplay", &["-nodisp", "-autoexit", "-loglevel", "error", "-i", "pipe:0"])
+        Player { stream: None, sink: None }
     }
 
-    pub fn with_command(program: &str, args: &[&str]) -> Self {
-        Player { program: program.to_owned(), args: args.iter().map(|a| (*a).to_owned()).collect(), child: None }
+    fn sink(&mut self) -> Result<&Sink> {
+        if self.sink.is_none() {
+            let (stream, handle) = OutputStream::try_default().map_err(|e| anyhow!("no audio output: {e}"))?;
+            let sink = Sink::try_new(&handle).map_err(|e| anyhow!("could not open audio output: {e}"))?;
+            self.stream = Some(stream);
+            self.sink = Some(sink);
+        }
+        Ok(self.sink.as_ref().unwrap())
     }
 
     pub fn play(&mut self, wav: &[u8]) -> Result<()> {
-        self.stop();
-        let mut child = Command::new(&self.program)
-            .args(&self.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| anyhow!("could not start {} for playback ({e}); install ffmpeg's ffplay or put another player on PATH", self.program))?;
-        let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
-        let data = wav.to_vec();
-        std::thread::spawn(move || stdin.write_all(&data));
-        self.child = Some(child);
+        let (rate, channels, samples) = pcm_i16(&decode_pcm(wav)?)?;
+        let sink = self.sink()?;
+        sink.stop();
+        sink.append(SamplesBuffer::new(channels, rate, samples));
+        sink.play();
         Ok(())
     }
 
-    pub fn is_playing(&mut self) -> bool {
-        match self.child.as_mut().map(Child::try_wait) {
-            Some(Ok(None)) => true,
-            Some(_) => {
-                self.child = None;
-                false
-            }
-            None => false,
-        }
-    }
-
     pub fn stop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            child.kill().ok();
-            child.wait().ok();
+        if let Some(sink) = &self.sink {
+            sink.stop();
         }
     }
+}
+
+fn pcm_i16(wav: &[u8]) -> Result<(u32, u16, Vec<i16>)> {
+    ensure!(wav.len() >= 44 && &wav[..4] == b"RIFF" && &wav[8..12] == b"WAVE", "not a wav");
+    let mut off = 12usize;
+    let mut rate = None;
+    let mut channels = None;
+    let mut data = None;
+    while off + 8 <= wav.len() {
+        let id = &wav[off..off + 4];
+        let size = u32::from_le_bytes(wav[off + 4..off + 8].try_into()?) as usize;
+        let body = wav.get(off + 8..off + 8 + size).ok_or_else(|| anyhow!("truncated wav"))?;
+        match id {
+            b"fmt " => {
+                ensure!(body.len() >= 16 && u16::from_le_bytes([body[0], body[1]]) == 1, "not pcm");
+                channels = Some(u16::from_le_bytes([body[2], body[3]]));
+                rate = Some(u32::from_le_bytes(body[4..8].try_into()?));
+                ensure!(u16::from_le_bytes([body[14], body[15]]) == 16, "not 16-bit pcm");
+            }
+            b"data" => data = Some(body),
+            _ => {}
+        }
+        off += 8 + size + (size & 1);
+    }
+    let samples = data.ok_or_else(|| anyhow!("wav has no data"))?.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect();
+    Ok((rate.ok_or_else(|| anyhow!("wav has no fmt"))?, channels.ok_or_else(|| anyhow!("wav has no fmt"))?, samples))
 }
 
 impl Default for Player {
@@ -156,8 +163,30 @@ impl Default for Player {
     }
 }
 
-impl Drop for Player {
-    fn drop(&mut self) {
-        self.stop();
+#[cfg(test)]
+mod pcm_tests {
+    use super::*;
+
+    fn fmt(bits: u16) -> Vec<u8> {
+        let mut f = vec![1, 0, 2, 0];
+        f.extend_from_slice(&44100u32.to_le_bytes());
+        f.extend_from_slice(&[0; 6]);
+        f.extend_from_slice(&bits.to_le_bytes());
+        f
+    }
+
+    #[test]
+    fn pcm_i16_reads_rate_channels_samples() {
+        let wav = riff(&fmt(16), &[1, 0, 255, 255, 0, 0, 0, 0]);
+        assert_eq!(pcm_i16(&wav).unwrap(), (44100, 2, vec![1, -1, 0, 0]));
+    }
+
+    #[test]
+    fn pcm_i16_rejects_bad_input() {
+        assert!(pcm_i16(&riff(&fmt(8), &[0; 40])).is_err());
+        let mut truncated = riff(&fmt(16), &[0; 40]);
+        truncated.truncate(truncated.len() - 4);
+        assert!(pcm_i16(&truncated).is_err());
+        assert!(pcm_i16(&[0; 64]).is_err());
     }
 }
