@@ -5,6 +5,18 @@ Browse and inspect assets for the Xbox 360 game 1vs100.
 ## Features
 
 - Asset browsing
+  - CAFF
+  - LZX
+  - STFS
+  - STRB
+  - AVATARS
+  - XDBF
+  - XEX
+  - XSB
+  - XUI
+  - XUR
+  - XWB
+  - YTGR
 - CLI and GUI interfaces
 - Cross-platform
 
