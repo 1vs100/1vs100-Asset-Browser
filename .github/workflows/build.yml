@@ -42,3 +42,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - run: cargo build --workspace --locked
+
+      - name: Package binaries
+        shell: bash
+        run: |
+          mkdir dist
+          if [[ "${{ matrix.os }}" == "windows" ]]; then
+            cp target/release/onevs100_cli.exe dist/
+            cp target/release/onevs100_gui.exe dist/
+          else
+            cp target/release/onevs100_cli dist/
+            cp target/release/onevs100_gui dist/
+          fi
+          tar -czf "onevs100-${{ matrix.os }}-${{ matrix.arch }}.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: onevs100-${{ matrix.os }}-${{ matrix.arch }}
+          path: onevs100-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
