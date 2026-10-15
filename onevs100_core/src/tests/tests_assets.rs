@@ -1,15 +1,27 @@
 use crate::assets::{self, Store};
 use std::path::{Path, PathBuf};
 
-const ZIP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/su17559/su.zip");
-const UPDATE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/su17559/x/$SystemUpdate");
-const PIRS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/su/FFFE07DF00000002");
-const EXTRACTED_TOC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/avatar/AvatarAssetPack.toc");
+const ZIP: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/su/SystemUpdate_17559_USB.zip");
+const UPDATE_DIR: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../testdata/su"
+);
+const PIRS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../testdata/su/FFFE07DF00000002"
+);
+const EXTRACTED_TOC: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../testdata/avatar/AvatarAssetPack.toc"
+);
 
 fn scratch(name: &str) -> PathBuf {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("onevs100_assets_{name}_{}_{id}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "onevs100_assets_{name}_{}_{id}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -17,9 +29,7 @@ fn scratch(name: &str) -> PathBuf {
 
 fn installed(source: &str) {
     let store = Store::at(scratch("ok"));
-    if !Path::new(source).exists() {
-        return;
-    }
+    let _ = std::fs::metadata(source).unwrap();
     assert!(!store.is_installed());
     let done = store.import(Path::new(source)).unwrap();
     assert!(store.is_installed());
@@ -60,7 +70,10 @@ fn unrelated_input_is_rejected_with_a_helpful_message_and_installs_nothing() {
     let junk = store.dir().join("junk.bin");
     std::fs::write(&junk, vec![7u8; 4096]).unwrap();
     let message = store.import(&junk).unwrap_err().to_string();
-    assert!(message.contains("17559") && message.contains("junk.bin"), "{message}");
+    assert!(
+        message.contains("17559") && message.contains("junk.bin"),
+        "{message}"
+    );
     assert!(store.import(Path::new("/definitely/not/here")).is_err());
     assert!(store.import(store.dir()).is_err());
     assert!(!store.is_installed());
@@ -86,7 +99,10 @@ fn the_first_readable_candidate_wins() {
     let dir = scratch("cand");
     let (a, b) = (dir.join("a.toc"), dir.join("b.toc"));
     std::fs::write(&b, b"second").unwrap();
-    assert_eq!(crate::body::first_readable(&[a.clone(), b.clone()]), Some(b"second".to_vec()));
+    assert_eq!(
+        crate::body::first_readable(&[a.clone(), b.clone()]),
+        Some(b"second".to_vec())
+    );
     assert_eq!(crate::body::first_readable(&[a]), None);
 }
 
