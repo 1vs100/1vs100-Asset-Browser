@@ -41,6 +41,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Install ALSA dependencies
+        if: ${{ matrix.os == 'ubuntu' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
       - run: cargo build --release --workspace --locked
 
       - name: Package binaries
