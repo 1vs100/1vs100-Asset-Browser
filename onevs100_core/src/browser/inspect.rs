@@ -272,7 +272,7 @@ fn raster(data: &[u8]) -> Result<Detail> {
 }
 
 fn mct_texture(data: &[u8]) -> Detail {
-    let mut lines = vec![format!("MCT second-stage texture codec, {} bytes", data.len()), "stored under a .png name inside the archive".into(), "preview is decoded by the game's own decoder (research helper), see the image once ready".into()];
+    let mut lines = vec![format!("MCT second-stage texture codec, {} bytes", data.len()), "stored under a .png name inside the archive".into(), "LZX-packed DXT5 planes, preview decodes in the background".into()];
     lines.extend(hex_dump(data).into_iter().skip(1).take(4));
     Detail { kind: "MCT texture", lines, image: None, text: None, pending_preview: true, scene: None, figure: None }
 }
