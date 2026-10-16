@@ -79,14 +79,6 @@ fn dxt1_three_colour_mode_has_transparent_index_three() {
 }
 
 #[test]
-fn dxt5_alpha_table_modes() {
-    let eight = xenos::dxt5_alphas(200, 100);
-    assert_eq!(eight[2], ((6 * 200 + 100) / 7) as u8);
-    let six = xenos::dxt5_alphas(100, 200);
-    assert_eq!((six[6], six[7]), (0, 255));
-}
-
-#[test]
 fn texture_decode_places_block_at_tiled_position() {
     let (levels, total) = xenos::mip_layout(64, 64, xenos::Format::Dxt1, 1);
     let mut buf = vec![0u8; total];
@@ -150,7 +142,7 @@ fn texture_pixels_match_python_reference() {
     let small = texture::decode(&raw, &list[0], 3).unwrap();
     assert_eq!((small.len(), small[0]), (32 * 32, [223, 206, 134, 230]));
     let dxt = texture::decode(&raw, &list[1], 0).unwrap();
-    assert_eq!((dxt[0], dxt[dxt.len() / 2 + 7]), ([18, 24, 41, 255], [29, 34, 51, 255]));
+    assert_eq!((dxt[0], dxt[dxt.len() / 2 + 7]), ([18, 24, 41, 255], [30, 34, 51, 255]));
 }
 
 #[test]

@@ -121,72 +121,11 @@ pub fn mip_layout(width: u32, height: u32, format: Format, mips: u32) -> (Vec<Mi
     (out, tail.map_or(offset, |t| t + 32 * 32 * bytes))
 }
 
-fn rgb565(c: u16) -> [u32; 3] {
-    let (r, g, b) = ((c >> 11) & 31, (c >> 5) & 63, c & 31);
-    [r as u32 * 255 / 31, g as u32 * 255 / 63, b as u32 * 255 / 31]
-}
-
-fn mix(a: [u32; 3], b: [u32; 3], wa: u32, wb: u32) -> Rgba {
-    let c = |i: usize| ((wa * a[i] + wb * b[i]) / (wa + wb)) as u8;
-    [c(0), c(1), c(2), 255]
-}
-
-fn colour_palette(c0: u16, c1: u16, four_colour: bool) -> [Rgba; 4] {
-    let (a, b) = (rgb565(c0), rgb565(c1));
-    let opaque = |c: [u32; 3]| [c[0] as u8, c[1] as u8, c[2] as u8, 255];
-    if four_colour || c0 > c1 {
-        [opaque(a), opaque(b), mix(a, b, 2, 1), mix(a, b, 1, 2)]
-    } else {
-        [opaque(a), opaque(b), mix(a, b, 1, 1), [0, 0, 0, 0]]
-    }
-}
-
-fn le16(b: &[u8], o: usize) -> u16 {
-    u16::from_le_bytes([b[o], b[o + 1]])
-}
-
-fn colour_pixels(block: &[u8], four_colour: bool) -> [Rgba; 16] {
-    let pal = colour_palette(le16(block, 0), le16(block, 2), four_colour);
-    let idx = u32::from_le_bytes(block[4..8].try_into().unwrap());
-    std::array::from_fn(|i| pal[((idx >> (2 * i)) & 3) as usize])
-}
-
-pub fn dxt5_alphas(a0: u8, a1: u8) -> [u8; 8] {
-    let (x, y) = (a0 as u32, a1 as u32);
-    let lerp = |i: u32, n: u32| (((n - i) * x + i * y) / n) as u8;
-    if a0 > a1 {
-        std::array::from_fn(|i| match i {
-            0 => a0,
-            1 => a1,
-            _ => lerp(i as u32 - 1, 7),
-        })
-    } else {
-        std::array::from_fn(|i| match i {
-            0 => a0,
-            1 => a1,
-            6 => 0,
-            7 => 255,
-            _ => lerp(i as u32 - 1, 5),
-        })
-    }
-}
-
 pub fn decode_block(block: &[u8], format: Format) -> [Rgba; 16] {
     match format {
-        Format::Dxt1 => colour_pixels(block, false),
-        Format::Dxt3 => {
-            let alpha = u64::from_le_bytes(block[..8].try_into().unwrap());
-            let mut px = colour_pixels(&block[8..], true);
-            px.iter_mut().enumerate().for_each(|(i, p)| p[3] = ((alpha >> (4 * i)) & 15) as u8 * 17);
-            px
-        }
-        Format::Dxt5 => {
-            let table = dxt5_alphas(block[0], block[1]);
-            let bits = u64::from_le_bytes([block[2], block[3], block[4], block[5], block[6], block[7], 0, 0]);
-            let mut px = colour_pixels(&block[8..], true);
-            px.iter_mut().enumerate().for_each(|(i, p)| p[3] = table[((bits >> (3 * i)) & 7) as usize]);
-            px
-        }
+        Format::Dxt1 => texpresso::Format::Bc1.decompress_block(block),
+        Format::Dxt3 => texpresso::Format::Bc2.decompress_block(block),
+        Format::Dxt5 => texpresso::Format::Bc3.decompress_block(block),
         Format::Argb8 => {
             let mut px = [[0; 4]; 16];
             px[0] = [block[1], block[2], block[3], block[0]];

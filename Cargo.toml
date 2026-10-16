@@ -12,10 +12,6 @@ winit = { version = "0.30", features = ["serde"] }
 pollster = "0.3"
 glam = "0.24"
 image = { version = "0.25", features = ["png", "jpeg", "bmp", "tiff", "dds"] }
-bcndecode = "0.1"
-tbc = "0.1"
-squish = "1.0.0"
-stb_dxt = "0.1"
 ucfx_byteswap = "2.1"
 bytemuck = "1.14"
 serde = { version = "1.0", features = ["derive"] }
