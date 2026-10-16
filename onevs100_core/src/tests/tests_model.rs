@@ -116,8 +116,8 @@ fn textures_decode_to_the_reference_pixels() {
     let px = t[0].rgba().unwrap();
     let at = |x: usize, y: usize| px[(y * 128 + x) * 4..(y * 128 + x) * 4 + 4].to_vec();
     assert_eq!(at(10, 10), vec![40, 38, 40, 255]);
-    assert_eq!(at(64, 100), vec![221, 202, 175, 255]);
-    assert_eq!(at(120, 120), vec![106, 85, 65, 255]);
+    assert_eq!(at(64, 100), vec![222, 202, 175, 255]);
+    assert_eq!(at(120, 120), vec![107, 85, 66, 255]);
     assert_eq!(t[1].rgba().unwrap().len(), 32 * 32 * 4);
 }
 

@@ -273,51 +273,23 @@ fn real_png_has_no_pending_preview() {
 }
 
 #[test]
-fn mct_decodes_through_the_research_helper() {
-    if !mct::decoder_available() {
-        return;
-    }
+fn mct_decodes_bit_exact_to_the_title_decoder() {
+    use sha1::{Digest, Sha1};
     let data = first_mct("answer_glow.png");
+    let (w, h, dxt) = mct::dxt5(&data).unwrap();
+    assert_eq!((w, h), (273, 213));
+    // hash of the title decoder's output (run under emulation), pitch padding removed
+    let hex: String = Sha1::digest(&dxt).iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(hex, "5ac90a32eea5153a367a5a20e8525f33ad1fd9b8");
     let img = mct::decode(&data).unwrap();
-    assert_eq!((img.width, img.height), (273, 213));
+    assert_eq!((img.width, img.height, img.rgba.len()), (273, 213, 273 * 213 * 4));
     assert!(img.rgba.chunks(4).any(|p| p[3] > 0), "fully transparent");
-    assert!(mct::cached(&data));
-    assert_eq!(mct::decode(&data).unwrap(), img);
 }
 
 #[test]
 fn mct_decode_rejects_garbage() {
-    if !mct::decoder_available() {
-        return;
-    }
     assert!(mct::decode(b".mct\x00\x01\x02").is_err());
-}
-
-#[test]
-fn mct_tools_are_found_in_the_first_candidate_that_has_the_helper() {
-    let root = std::env::temp_dir().join(format!("onevs100-tools-{}", std::process::id()));
-    let (empty, good) = (root.join("empty"), root.join("good"));
-    std::fs::create_dir_all(&empty).unwrap();
-    std::fs::create_dir_all(&good).unwrap();
-    std::fs::write(good.join("mct_decode.py"), "").unwrap();
-    let found = mct::locate_tools([root.join("missing"), empty.clone(), good.clone()]);
-    std::fs::remove_dir_all(&root).unwrap();
-    assert_eq!(found, Some(good));
-    assert_eq!(mct::locate_tools([PathBuf::from("/nonexistent/x")]), None);
-}
-
-#[test]
-fn mct_missing_helper_error_says_how_to_fix_it() {
-    let msg = mct::missing_tools_message(&[PathBuf::from("/a/b"), PathBuf::from("/c")]);
-    for want in ["ONEVS100_TOOLS", "mct_decode.py", "/a/b", "/c", "title-1317.bin"] {
-        assert!(msg.contains(want), "{msg}");
-    }
-}
-
-#[test]
-fn mct_candidates_include_the_environment_override_first() {
-    let c = mct::tool_candidates(Some(PathBuf::from("/custom/tools")), Some(PathBuf::from("/opt/app/bin")), Some(PathBuf::from("/work/dir")));
-    assert_eq!(c[0], PathBuf::from("/custom/tools"));
-    assert!(c.contains(&PathBuf::from("/opt/app/common/content_package_editor")), "{c:?}");
-    assert!(c.contains(&PathBuf::from("/work/common/content_package_editor")), "{c:?}");
+    let data = first_mct("answer_glow.png");
+    assert!(mct::decode(&data[..data.len() - 1]).is_err());
+    assert!(mct::decode(&data[..200]).is_err());
 }
