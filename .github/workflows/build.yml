@@ -1,0 +1,70 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu, macos, windows]
+        arch: [x64, arm64]
+        include:
+          - os: ubuntu
+            arch: x64
+            runner: ubuntu-latest
+          - os: ubuntu
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - os: macos
+            arch: x64
+            runner: macos-15-intel
+          - os: macos
+            arch: arm64
+            runner: macos-latest
+          - os: windows
+            arch: x64
+            runner: windows-latest
+          - os: windows
+            arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    name: ${{ matrix.os }}-${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ALSA dependencies
+        if: ${{ matrix.os == 'ubuntu' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
+      - run: cargo build --release --workspace --locked
+
+      - name: Package binaries
+        shell: bash
+        run: |
+          mkdir dist
+          if [[ "${{ matrix.os }}" == "windows" ]]; then
+            cp target/release/onevs100_cli.exe dist/
+            cp target/release/onevs100_gui.exe dist/
+          else
+            cp target/release/onevs100_cli dist/
+            cp target/release/onevs100_gui dist/
+          fi
+          tar -czf "onevs100-${{ matrix.os }}-${{ matrix.arch }}.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: onevs100-${{ matrix.os }}-${{ matrix.arch }}
+          path: onevs100-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
